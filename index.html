@@ -140,12 +140,19 @@
       opacity: 0.75;
     }
 
+    button.map.picked {
+      border-color: #355740;
+      background: #1f2d24;
+      color: #cbf5dd;
+      opacity: 0.92;
+    }
+
     button.map.decider {
       border-color: #39d98a;
-      background: #1b2230;           /* обычный фон */
+      background: #1b2230;
       color: var(--text);
       box-shadow: 0 0 0 3px rgba(57, 217, 138, 0.45);
-      opacity: 1;                    /* полностью яркая */
+      opacity: 1;
     }
 
     .map-image {
@@ -157,11 +164,11 @@
       background-size: cover;
       background-position: center;
       z-index: -3;
-      filter: brightness(1);         /* для decider будет ярче */
+      filter: brightness(1);
     }
 
     button.map.decider .map-image {
-      filter: brightness(1.08) saturate(1.15); /* делаем decider чуть ярче и насыщеннее */
+      filter: brightness(1.08) saturate(1.15);
     }
 
     .map-overlay {
@@ -174,7 +181,6 @@
       pointer-events: none;
     }
 
-    /* Для banned делаем темнее */
     button.map.banned .map-overlay {
       background:
         linear-gradient(to top, rgba(30, 5, 12, 0.92) 20%, rgba(30, 5, 12, 0.65) 55%, rgba(30, 5, 12, 0.35) 100%),
@@ -232,6 +238,11 @@
       color: #ffd0db;
     }
 
+    button.map.picked .map-title,
+    button.map.picked .map-subtitle {
+      color: #d8ffe8;
+    }
+
     .footer {
       margin-top: 16px;
       display: flex;
@@ -249,12 +260,21 @@
       padding: 8px 12px;
       cursor: pointer;
     }
+
+    .btn-mode {
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: #1a2230;
+      color: var(--text);
+      padding: 8px 12px;
+      cursor: pointer;
+    }
   </style>
 </head>
 <body>
   <main class="app">
     <h1>Шоуматч CS2 Map Veto</h1>
-    <p class="subtitle">По очереди баньте карты, пока не останется decider.</p>
+    <p id="subtitle" class="subtitle">По очереди баньте карты, пока не останется decider.</p>
 
     <section class="controls">
       <div class="control">
@@ -272,6 +292,7 @@
 
     <div class="footer">
       <button id="resetBtn" class="btn-reset">Новая серия вето</button>
+      <button id="modeBtn" class="btn-mode">Режим: BO1</button>
     </div>
   </main>
 
@@ -280,7 +301,6 @@
       "de_mirage",
       "de_overpass",
       "de_dust2",
-      "de_train",
       "de_ancient",
       "de_inferno",
       "de_nuke",
@@ -291,7 +311,6 @@
       de_mirage: "https://files.bo3.gg/uploads/image/41377/image/webp-81fe4ce1e60e951d61e41a7b7dbfe8ee.webp",
       de_overpass: "https://pl.egw.news/_next/image?url=https%3A%2F%2Fegw.news%2Fuploads%2Fnews%2F1%2F17%2F1752661190633_1752661190633.webp&w=1920&q=75",
       de_dust2: "https://image-proxy.bo3.gg/uploads/news/37429/title_image/webp-e2d33cdc1a6d5206069f2b06bbedc3f6.webp.webp?w=1248&h=624",
-      de_train: "https://cdn.sanity.io/images/6znhzi10/production/d72ebcffe297b573d921eb18436ecdf458aff188-1917x1054.jpg?w=1600&auto=format",
       de_ancient: "https://images.steamusercontent.com/ugc/2042997274847133077/8534B50A5A691EE7D3F1500E1CF03D41A37D03AC/?imw=5000&imh=5000&ima=fit&impolicy=Letterbox&imcolor=%23000000&letterbox=false",
       de_inferno: "https://i.redd.it/new-cs2-inferno-v0-5mdovmk0329b1.png?width=1920&format=png&auto=webp&s=0c085b6c9a4f1c855f5f22614d8ab60c25423180",
       de_nuke: "https://i.redd.it/nuke-cs1-vs-cs2-comparison-shots-v0-1rl0kalos29b1.png?width=2560&format=png&auto=webp&s=920e3cb3d15f245468c66ea1932211d6a538cfc9",
@@ -299,16 +318,19 @@
     };
 
     const state = {
+      mode: "bo1",
       currentTurn: 0,
-      bannedMaps: [],
+      actions: [],
       decider: null
     };
 
+    const subtitle = document.getElementById("subtitle");
     const teamAInput = document.getElementById("teamA");
     const teamBInput = document.getElementById("teamB");
     const mapGrid = document.getElementById("mapGrid");
     const status = document.getElementById("status");
     const resetBtn = document.getElementById("resetBtn");
+    const modeBtn = document.getElementById("modeBtn");
 
     function activeTeams() {
       const teamA = teamAInput.value.trim() || "Team A";
@@ -316,8 +338,34 @@
       return [teamA, teamB];
     }
 
+    function bo3Step(actionCount) {
+      const steps = [
+        { type: "ban", team: 0 },
+        { type: "ban", team: 1 },
+        { type: "pick", team: 0 },
+        { type: "pick", team: 1 },
+        { type: "ban", team: 0 },
+        { type: "ban", team: 1 }
+      ];
+      return steps[actionCount] || null;
+    }
+
+    function actionForMap(mapName) {
+      return state.actions.find((action) => action.mapName === mapName) || null;
+    }
+
     function remainingMaps() {
-      return mapPool.filter((map) => !state.bannedMaps.includes(map));
+      return mapPool.filter((map) => !actionForMap(map));
+    }
+
+    function syncDerivedState() {
+      state.currentTurn = state.actions.length;
+      const left = remainingMaps();
+      if (state.mode === "bo1") {
+        state.decider = left.length === 1 ? left[0] : null;
+        return;
+      }
+      state.decider = state.actions.length >= 6 && left.length === 1 ? left[0] : null;
     }
 
     function updateStatus() {
@@ -327,21 +375,48 @@
       }
 
       const teams = activeTeams();
-      const currentTeam = teams[state.currentTurn % 2];
-      status.innerHTML = `Сейчас банит: <strong>${currentTeam}</strong>`;
+      if (state.mode === "bo1") {
+        const currentTeam = teams[state.currentTurn % 2];
+        status.innerHTML = `Сейчас банит: <strong>${currentTeam}</strong>`;
+        return;
+      }
+
+      const step = bo3Step(state.actions.length);
+      if (!step) {
+        status.innerHTML = "Серия BO3 завершена.";
+        return;
+      }
+      const currentTeam = teams[step.team];
+      const actionName = step.type === "pick" ? "пикает" : "банит";
+      status.innerHTML = `Сейчас <strong>${currentTeam}</strong> ${actionName} карту`;
+    }
+
+    function updateSubtitleAndModeButton() {
+      if (state.mode === "bo1") {
+        subtitle.textContent = "По очереди баньте карты, пока не останется decider.";
+        modeBtn.textContent = "Режим: BO1";
+      } else {
+        subtitle.textContent = "BO3: Ban, Ban, Pick, Pick, Ban, Ban, затем decider.";
+        modeBtn.textContent = "Режим: BO3";
+      }
     }
 
     function banMap(mapName) {
-      if (state.bannedMaps.includes(mapName) || state.decider) return;
-
-      state.bannedMaps.push(mapName);
-      state.currentTurn += 1;
-
-      const left = remainingMaps();
-      if (left.length === 1) {
-        state.decider = left[0];
+      const existing = actionForMap(mapName);
+      if (existing) {
+        state.actions = state.actions.filter((action) => action.mapName !== mapName);
+      } else {
+        if (state.mode === "bo3") {
+          const step = bo3Step(state.actions.length);
+          if (!step) return;
+          state.actions.push({ mapName, type: step.type, team: step.team });
+        } else {
+          if (state.decider) return;
+          state.actions.push({ mapName, type: "ban", team: state.actions.length % 2 });
+        }
       }
 
+      syncDerivedState();
       render();
     }
 
@@ -380,9 +455,16 @@
         inner.append(topBadge, title, subtitle);
         btn.append(image, overlay, inner);
 
-        if (state.bannedMaps.includes(mapName)) {
+        const action = actionForMap(mapName);
+        if (action && action.type === "ban") {
           btn.classList.add("banned");
-          btn.disabled = true;
+          topBadge.textContent = "BAN";
+        }
+
+        if (action && action.type === "pick") {
+          const teams = activeTeams();
+          btn.classList.add("picked");
+          topBadge.textContent = `PICK • ${teams[action.team]}`;
         }
 
         if (state.decider === mapName) {
@@ -398,19 +480,27 @@
 
     function resetVeto() {
       state.currentTurn = 0;
-      state.bannedMaps = [];
+      state.actions = [];
       state.decider = null;
       render();
     }
 
+    function toggleMode() {
+      state.mode = state.mode === "bo1" ? "bo3" : "bo1";
+      resetVeto();
+    }
+
     function render() {
+      syncDerivedState();
+      updateSubtitleAndModeButton();
       renderMaps();
       updateStatus();
     }
 
-    teamAInput.addEventListener("input", updateStatus);
-    teamBInput.addEventListener("input", updateStatus);
+    teamAInput.addEventListener("input", render);
+    teamBInput.addEventListener("input", render);
     resetBtn.addEventListener("click", resetVeto);
+    modeBtn.addEventListener("click", toggleMode);
 
     render();
   </script>
